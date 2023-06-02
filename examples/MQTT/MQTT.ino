@@ -10,18 +10,29 @@
 #define XPOWERS_CHIP_AXP2102
 #include "XPowersLib.h"
 #include "utilities.h"
+#include <esp_sleep.h>
+//WDT
+#include "esp_system.h"
+const int wdtTimeout = 30*1000;  //time in ms to trigger the watchdog
+hw_timer_t *timer = NULL;
 
 XPowersPMU  PMU;
-
+#define SW_LOW 16
+#define SW_HIGH 17
+#define SW_COM 18
+#define SECOND_SW_LOW 8
+#define SECOND_SW_HIGH 3
+#define SECOND_SW_COM 46
 // See all AT commands, if wanted
-#define DUMP_AT_COMMANDS
+// #define DUMP_AT_COMMANDS
 
 #define TINY_GSM_RX_BUFFER 1024
 
 #define TINY_GSM_MODEM_SIM7080
 #include <TinyGsmClient.h>
 #include "utilities.h"
-
+#define SerialMon Serial
+#define SerialAT Serial1
 
 #ifdef DUMP_AT_COMMANDS
 #include <StreamDebugger.h>
@@ -48,7 +59,9 @@ enum {
 
 #define randMax 35
 #define randMin 18
-
+uint64_t sleepSec = 60*60 - 5;//60min-実行時間5ｓ
+RTC_DATA_ATTR uint16_t bootCount = 0;
+const int deepsleep_sec = 60;
 // Your GPRS credentials, if any
 const char apn[] = "povo.jp";
 const char gprsUser[] = "";
@@ -91,19 +104,56 @@ bool isConnect()
     return false;
 }
 
+void IRAM_ATTR deep_sleep(){
+    timerWrite(timer, 0);
+    Serial.println("modem.poweroff");
+    modem.sendAT(GF("+CPOWD=1"));
+    PMU.disableDC3();
+    Serial.printf("sleep \n");
+
+    if (bootCount == 0){
+        delay(10000);
+    } 
+    if (bootCount < 10)
+    {
+        sleepSec = 25;
+    }
+    
+    bootCount++;
+
+    // digitalWrite(LED1 ,LOW);
+    esp_sleep_enable_timer_wakeup(sleepSec * 1000 * 1000);
+    esp_deep_sleep_start();
+}
 
 void setup()
 {
-
+    pinMode( SW_LOW ,INPUT_PULLUP);
+    pinMode( SW_HIGH ,INPUT_PULLUP);
+    pinMode( SW_COM ,OUTPUT);
+    digitalWrite ( SW_COM ,LOW);
+    pinMode( SECOND_SW_LOW ,INPUT_PULLUP);
+    pinMode( SECOND_SW_HIGH ,INPUT_PULLUP);
+    pinMode( SECOND_SW_COM ,OUTPUT);
+    digitalWrite ( SECOND_SW_COM ,LOW);
+    timer = timerBegin(0, 80, true);                  //timer 0, div 80
+    timerAttachInterrupt(timer, &deep_sleep, true);  //attach callback
+    timerAlarmWrite(timer, wdtTimeout * 1000, false); //set time in us
+    timerAlarmEnable(timer);                          //enable interrupt
+    timerWrite(timer, 0);
     Serial.begin(115200);
 
     //Start while waiting for Serial monitoring
-    while (!Serial);
+    // while (!Serial);
 
     delay(3000);
 
     Serial.println();
-
+    // Set the sleep mode to Deep Sleep
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_ON);
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_ON);
+    esp_sleep_enable_timer_wakeup(deepsleep_sec * 1000000ULL); // Set the sleep time to 600 seconds
     /*********************************
      *  step 1 : Initialize power chip,
      *  turn on modem and gps antenna power channel
@@ -120,12 +170,21 @@ void setup()
 
     //Modem GPS Power channel
     PMU.setBLDO2Voltage(3300);
-    PMU.enableBLDO2();      //The antenna power must be turned on to use the GPS function
+    PMU.disableBLDO2();      //The antenna power must be turned on to use the GPS function
 
     // TS Pin detection must be disable, otherwise it cannot be charged
     PMU.disableTSPinMeasure();
+    // Get the VSYS shutdown voltage
+    uint16_t vol = PMU.getSysPowerDownVoltage();
+    Serial.printf("->  getSysPowerDownVoltage:%u\n", vol);
 
-
+    // Set VSY off voltage as 2600mV , Adjustment range 2600mV ~ 3300mV
+    PMU.setSysPowerDownVoltage(2600);
+    // Enable internal ADC detection
+    PMU.enableBattDetection();
+    PMU.enableVbusVoltageMeasure();
+    PMU.enableBattVoltageMeasure();
+    PMU.enableSystemVoltageMeasure();
     /*********************************
      * step 2 : start modem
     ***********************************/
@@ -148,10 +207,39 @@ void setup()
             digitalWrite(BOARD_MODEM_PWR_PIN, LOW);
             retry = 0;
             Serial.println("Retry start modem .");
+            timerWrite(timer, 0);
+        }else
+        {
+            PMU.disableDC3();
+            delay(1000);
+            PMU.setDC3Voltage(3000);    //SIM7080 Modem main power channel 2700~ 3400V
+            PMU.enableDC3();
+            retry = 0;
         }
+        
     }
     Serial.println();
     Serial.print("Modem started!");
+
+//   String modemInfo = modem.getModemInfo();
+//   SerialMon.print("Modem Info: ");
+//   SerialMon.println(modemInfo);
+//   modem.gprsConnect("povo.jp", "", "");// 初回だけ必要
+//   SerialMon.print(F("waitForNetwork()"));
+//   while (!modem.waitForNetwork()) SerialMon.print(".");
+//   SerialMon.println(F(" Ok."));
+
+//   SerialMon.print(F("gprsConnect(soracom.io)"));
+//   modem.gprsConnect("povo.jp", "", "");
+//   SerialMon.println(F(" done."));
+
+//   SerialMon.print(F("isNetworkConnected()"));
+//   while (!modem.isNetworkConnected()) SerialMon.print(".");
+//   SerialMon.println(F(" Ok."));
+
+//   SerialMon.print(F("My IP addr: "));
+//   IPAddress ipaddr = modem.localIP();
+//   SerialMon.println(ipaddr);
 
     /*********************************
      * step 3 : Check if the SIM card is inserted
@@ -168,7 +256,7 @@ void setup()
     /*********************************
      * step 4 : Set the network mode to NB-IOT
     ***********************************/
-
+    timerWrite(timer, 0);
     modem.setNetworkMode(38);    //LTE only
 
     modem.setPreferredMode(MODEM_CATM);
@@ -199,7 +287,7 @@ void setup()
 
     // Activate network bearer, APN can not be configured by default,
     // if the SIM card is locked, please configure the correct APN and user password, use the gprsConnect() method
-
+    timerWrite(timer, 0);
     bool res = modem.isGprsConnected();
     if (!res) {
         modem.sendAT("+CNACT=0,1");
@@ -261,22 +349,28 @@ void setup()
 
     Serial.println("MQTT Client connected!");
 
-    // random seed data
-    randomSeed(esp_random());
+
 }
 
 void loop()
 {
-    if (!isConnect()) {
-        Serial.println("MQTT Client disconnect!"); delay(1000);
-        return ;
-    }
-
+    // if (!isConnect()) {
+    //     Serial.println("MQTT Client disconnect!"); delay(1000);
+    //     return ;
+    // }
+    timerWrite(timer, 0);
     Serial.println();
     // Publish fake temperature data
-    String payload = "{\"temp\":";
-    int temp =  rand() % (randMax - randMin) + randMin;
-    payload.concat(temp);
+    String payload = "{\"water1\":";
+    int water1 = digitalRead( SW_LOW) * 49 + digitalRead( SW_HIGH) * 51; //ここに水位;
+    payload.concat(water1);
+    payload.concat(",\"water2\":");
+    int water2 = digitalRead( SECOND_SW_LOW) * 49 + digitalRead( SECOND_SW_HIGH) * 51; //ここに水位;
+    payload.concat(water2);
+    payload.concat(",\"vbat\":");
+    payload.concat(PMU.getBattVoltage()/42.2);
+    payload.concat(",\"bootCount\":");
+    payload.concat(bootCount);
     payload.concat("}");
     Serial.println(payload);
     // AT+SMPUB=<topic>,<content length>,<qos>,<retain><CR>message is enteredQuit edit mode if messagelength equals to <contentlength>
@@ -293,7 +387,9 @@ void loop()
             Serial.println("Send Packet failed!");
         }
     }
+    deep_sleep();
 
-    delay(60000);
+
+    // esp_deep_sleep_start(); 
 }
 
