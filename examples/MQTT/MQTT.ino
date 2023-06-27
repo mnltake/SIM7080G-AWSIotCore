@@ -7,6 +7,7 @@
  *
  */
 #include <Arduino.h>
+#include "pointdict.h"
 #define XPOWERS_CHIP_AXP2102
 #include "XPowersLib.h"
 #include "utilities.h"
@@ -60,8 +61,8 @@ enum {
 #define randMax 35
 #define randMin 18
 uint64_t sleepSec = 60*60 - 5;//60min-実行時間5ｓ
-RTC_DATA_ATTR uint16_t bootCount = 0;
-const int deepsleep_sec = 60;
+RTC_SLOW_ATTR uint16_t bootCount = 0;
+const int wdt_leep_sec = 60;
 // Your GPRS credentials, if any
 const char apn[] = "povo.jp";
 const char gprsUser[] = "";
@@ -92,7 +93,7 @@ char clientID[] = "SIM7080G";
 //  7.  Choose ICON
 //  8. Add Widget
 int data_channel = 0;
-
+const uint16_t sensorID = 219;
 
 bool isConnect()
 {
@@ -111,13 +112,13 @@ void IRAM_ATTR deep_sleep(){
     PMU.disableDC3();
     Serial.printf("sleep \n");
 
-    if (bootCount == 0){
-        delay(10000);
-    } 
-    if (bootCount < 10)
-    {
-        sleepSec = 25;
-    }
+    // if (bootCount == 0){
+    //     delay(10000);
+    // } 
+    // if (bootCount < 10)
+    // {
+    //     sleepSec = 25;
+    // }
     
     bootCount++;
 
@@ -150,10 +151,10 @@ void setup()
 
     Serial.println();
     // Set the sleep mode to Deep Sleep
-    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
-    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_ON);
-    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_ON);
-    esp_sleep_enable_timer_wakeup(deepsleep_sec * 1000000ULL); // Set the sleep time to 600 seconds
+    // esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+    // esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_ON);
+    // esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_ON);
+    // esp_sleep_enable_timer_wakeup(wdt_leep_sec * 1000000ULL); // Set the sleep time to 600 seconds
     /*********************************
      *  step 1 : Initialize power chip,
      *  turn on modem and gps antenna power channel
@@ -359,9 +360,30 @@ void loop()
     //     return ;
     // }
     timerWrite(timer, 0);
+    
+    int i=0;
+    double lat ;
+    double lon ;
+    while ((pointDictionaryArr[i].field_number != sensorID) && (i < sizeof(pointDictionaryArr)/12) ){
+    i++;
+    // delay(1);
+    }
+    if (i < sizeof(pointDictionaryArr)/12){
+    lat = pointDictionaryArr[i].point_lat;
+    lon = pointDictionaryArr[i].point_lon;
+    }else{
+    lat = 34.9537979;
+    lon = 136.935104;
+    }
+    char buflat[20],buflon[20];
+    char* strlat = dtostrf(lat, 4, 7, buflat);
+    char* strlon = dtostrf(lon, 4, 7, buflon);
     Serial.println();
     // Publish fake temperature data
-    String payload = "{\"water1\":";
+    String payload = "{";
+    payload.concat("\"sensorID\":");
+    payload.concat(sensorID);
+    payload.concat(",\"water1\":");
     int water1 = digitalRead( SW_LOW) * 49 + digitalRead( SW_HIGH) * 51; //ここに水位;
     payload.concat(water1);
     payload.concat(",\"water2\":");
@@ -369,7 +391,11 @@ void loop()
     payload.concat(water2);
     payload.concat(",\"vbat\":");
     payload.concat(PMU.getBattVoltage()/42.2);
-    payload.concat(",\"bootCount\":");
+    payload.concat(",\"lat\":");
+    payload.concat(strlat);
+    payload.concat(",\"lon\":");
+    payload.concat(strlon);
+    payload.concat(",\"bootcount\":");
     payload.concat(bootCount);
     payload.concat("}");
     Serial.println(payload);
