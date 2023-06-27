@@ -63,9 +63,9 @@ uint64_t sleepSec = 60*60 - 5;//60min-実行時間5ｓ
 RTC_DATA_ATTR uint16_t bootCount = 0;
 const int deepsleep_sec = 60;
 // Your GPRS credentials, if any
-const char apn[] = "povo.jp";
-const char gprsUser[] = "";
-const char gprsPass[] = "";
+const char apn[] = "soracom.io";
+const char gprsUser[] = "sora";
+const char gprsPass[] = "sora";
 
 // cayenne server address and port
 const char server[]   = "52.194.74.83";
@@ -139,7 +139,7 @@ void setup()
     timer = timerBegin(0, 80, true);                  //timer 0, div 80
     timerAttachInterrupt(timer, &deep_sleep, true);  //attach callback
     timerAlarmWrite(timer, wdtTimeout * 1000, false); //set time in us
-    timerAlarmEnable(timer);                          //enable interrupt
+    // timerAlarmEnable(timer);                          //enable interrupt
     timerWrite(timer, 0);
     Serial.begin(115200);
 
@@ -179,7 +179,7 @@ void setup()
     Serial.printf("->  getSysPowerDownVoltage:%u\n", vol);
 
     // Set VSY off voltage as 2600mV , Adjustment range 2600mV ~ 3300mV
-    PMU.setSysPowerDownVoltage(2600);
+    // PMU.setSysPowerDownVoltage(2600);
     // Enable internal ADC detection
     PMU.enableBattDetection();
     PMU.enableVbusVoltageMeasure();
@@ -270,16 +270,16 @@ void setup()
 
     /*********************************
     * step 5 : Wait for the network registration to succeed
-    ***********************************/
+    // ***********************************/
     RegStatus s;
-    do {
-        s = modem.getRegistrationStatus();
-        if (s != REG_OK_HOME && s != REG_OK_ROAMING) {
-            Serial.print(".");
-            delay(1000);
-        }
+    // do {
+    //     s = modem.getRegistrationStatus();
+    //     if (s != REG_OK_HOME && s != REG_OK_ROAMING) {
+    //         Serial.print(".");
+    //         delay(1000);
+    //     }
 
-    } while (s != REG_OK_HOME && s != REG_OK_ROAMING) ;
+    // } while (s != REG_OK_HOME && s != REG_OK_ROAMING) ;
 
     Serial.println();
     Serial.print("Network register info:");
@@ -361,15 +361,15 @@ void loop()
     timerWrite(timer, 0);
     Serial.println();
     // Publish fake temperature data
-    String payload = "{\"water1\":";
+    String payload = "{\"water3\":";
     int water1 = digitalRead( SW_LOW) * 49 + digitalRead( SW_HIGH) * 51; //ここに水位;
     payload.concat(water1);
-    payload.concat(",\"water2\":");
-    int water2 = digitalRead( SECOND_SW_LOW) * 49 + digitalRead( SECOND_SW_HIGH) * 51; //ここに水位;
-    payload.concat(water2);
-    payload.concat(",\"vbat\":");
+    // payload.concat(",\"water2\":");
+    // int water2 = digitalRead( SECOND_SW_LOW) * 49 + digitalRead( SECOND_SW_HIGH) * 51; //ここに水位;
+    // payload.concat(water2);
+    payload.concat(",\"vbat3\":");
     payload.concat(PMU.getBattVoltage()/42.2);
-    payload.concat(",\"bootCount\":");
+    payload.concat(",\"bootCount3\":");
     payload.concat(bootCount);
     payload.concat("}");
     Serial.println(payload);
