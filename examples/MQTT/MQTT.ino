@@ -63,9 +63,9 @@ uint64_t sleepSec = 60*60 - 5;//60min-実行時間5ｓ
 RTC_DATA_ATTR uint16_t bootCount = 0;
 const int deepsleep_sec = 60;
 // Your GPRS credentials, if any
-const char apn[] = "soracom.io";
-const char gprsUser[] = "sora";
-const char gprsPass[] = "sora";
+const char apn[] = "povo.jp";
+const char gprsUser[] = "";
+const char gprsPass[] = "";
 
 // cayenne server address and port
 const char server[]   = "52.194.74.83";
@@ -361,17 +361,17 @@ void loop()
     timerWrite(timer, 0);
     Serial.println();
     // Publish fake temperature data
-    String payload = "{\"water3\":";
+    String payload = "{\"ID\":\"003\",\"water3\":\"";
     int water1 = digitalRead( SW_LOW) * 49 + digitalRead( SW_HIGH) * 51; //ここに水位;
     payload.concat(water1);
     // payload.concat(",\"water2\":");
     // int water2 = digitalRead( SECOND_SW_LOW) * 49 + digitalRead( SECOND_SW_HIGH) * 51; //ここに水位;
     // payload.concat(water2);
-    payload.concat(",\"vbat3\":");
+    payload.concat("\",\"vbat3\":\"");
     payload.concat(PMU.getBattVoltage()/42.2);
-    payload.concat(",\"bootCount3\":");
+    payload.concat("\",\"bootCount3\":\"");
     payload.concat(bootCount);
-    payload.concat("}");
+    payload.concat("\",\"lat\":\"34.953950\",\"lon\":\"136.935557\"}");
     Serial.println(payload);
     // AT+SMPUB=<topic>,<content length>,<qos>,<retain><CR>message is enteredQuit edit mode if messagelength equals to <contentlength>
     snprintf(buffer, 1024, "+SMPUB=\"%s\",%d,1,1", topic, payload.length());
