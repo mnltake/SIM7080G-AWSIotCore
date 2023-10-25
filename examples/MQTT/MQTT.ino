@@ -59,9 +59,9 @@ enum {
 
 #define randMax 35
 #define randMin 18
-uint64_t sleepSec = 60*60 - 5;//60min-実行時間5ｓ
+uint64_t sleepSec = 15*60 - 5;//60min-実行時間5ｓ
 RTC_DATA_ATTR uint16_t bootCount = 0;
-const int deepsleep_sec = 60;
+// const int deepsleep_sec = 10;
 // Your GPRS credentials, if any
 const char apn[] = "povo.jp";
 const char gprsUser[] = "";
@@ -70,9 +70,9 @@ const char gprsPass[] = "";
 // cayenne server address and port
 const char server[]   = "52.194.74.83";
 const int  port       = 1883;
-const char topic[] = "SIM7080G/01/temp";
+const char topic[] = "LTE/SIM7080G02";
 char buffer[1024] = {0};
-
+const int16_t sensorID = 197;
 // To create a device : https://cayenne.mydevices.com/cayenne/dashboard
 //  1. Add new...
 //  2. Device/Widget
@@ -111,15 +111,15 @@ void IRAM_ATTR deep_sleep(){
     PMU.disableDC3();
     Serial.printf("sleep \n");
 
-    if (bootCount == 0){
-        delay(10000);
-    } 
-    if (bootCount < 10)
-    {
-        sleepSec = 25;
-    }
+    // if (bootCount == 0){
+    //     delay(10000);
+    // } 
+    // if (bootCount < 10)
+    // {
+    //     sleepSec = 25;
+    // }
     
-    bootCount++;
+    // bootCount++;
 
     // digitalWrite(LED1 ,LOW);
     esp_sleep_enable_timer_wakeup(sleepSec * 1000 * 1000);
@@ -153,7 +153,7 @@ void setup()
     esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
     esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_ON);
     esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_ON);
-    esp_sleep_enable_timer_wakeup(deepsleep_sec * 1000000ULL); // Set the sleep time to 600 seconds
+    // esp_sleep_enable_timer_wakeup(deepsleep_sec * 1000000ULL); // Set the sleep time to 600 seconds
     /*********************************
      *  step 1 : Initialize power chip,
      *  turn on modem and gps antenna power channel
@@ -198,21 +198,24 @@ void setup()
     int retry = 0;
     while (!modem.testAT(1000)) {
         Serial.print(".");
-        if (retry++ > 6) {
+        retry++;
+        if(retry < 6){
+            delay(2000);
+        }
+        else if (retry > 6) {
             // Pull down PWRKEY for more than 1 second according to manual requirements
             digitalWrite(BOARD_MODEM_PWR_PIN, LOW);
             delay(100);
             digitalWrite(BOARD_MODEM_PWR_PIN, HIGH);
             delay(1000);
             digitalWrite(BOARD_MODEM_PWR_PIN, LOW);
-            retry = 0;
-            Serial.println("Retry start modem .");
+             Serial.println("Retry start modem .");
             timerWrite(timer, 0);
-        }else
+        }else if (retry ==6 )
         {
             PMU.disableDC3();
             delay(1000);
-            PMU.setDC3Voltage(3000);    //SIM7080 Modem main power channel 2700~ 3400V
+            PMU.setDC3Voltage(3400);    //SIM7080 Modem main power channel 2700~ 3400V
             PMU.enableDC3();
             retry = 0;
         }
@@ -221,25 +224,25 @@ void setup()
     Serial.println();
     Serial.print("Modem started!");
 
-//   String modemInfo = modem.getModemInfo();
-//   SerialMon.print("Modem Info: ");
-//   SerialMon.println(modemInfo);
+  String modemInfo = modem.getModemInfo();
+  SerialMon.print("Modem Info: ");
+  SerialMon.println(modemInfo);
 //   modem.gprsConnect("povo.jp", "", "");// 初回だけ必要
-//   SerialMon.print(F("waitForNetwork()"));
-//   while (!modem.waitForNetwork()) SerialMon.print(".");
-//   SerialMon.println(F(" Ok."));
+  SerialMon.print(F("waitForNetwork()"));
+  while (!modem.waitForNetwork()) SerialMon.print(".");
+  SerialMon.println(F(" Ok."));
 
-//   SerialMon.print(F("gprsConnect(soracom.io)"));
-//   modem.gprsConnect("povo.jp", "", "");
-//   SerialMon.println(F(" done."));
+  SerialMon.print(F("gprsConnect(povo.jp)"));
+  modem.gprsConnect("povo.jp", "", "");
+  SerialMon.println(F(" done."));
 
-//   SerialMon.print(F("isNetworkConnected()"));
-//   while (!modem.isNetworkConnected()) SerialMon.print(".");
-//   SerialMon.println(F(" Ok."));
+  SerialMon.print(F("isNetworkConnected()"));
+  while (!modem.isNetworkConnected()) SerialMon.print(".");
+  SerialMon.println(F(" Ok."));
 
-//   SerialMon.print(F("My IP addr: "));
-//   IPAddress ipaddr = modem.localIP();
-//   SerialMon.println(ipaddr);
+  SerialMon.print(F("My IP addr: "));
+  IPAddress ipaddr = modem.localIP();
+  SerialMon.println(ipaddr);
 
     /*********************************
      * step 3 : Check if the SIM card is inserted
@@ -361,17 +364,26 @@ void loop()
     timerWrite(timer, 0);
     Serial.println();
     // Publish fake temperature data
-    String payload = "{\"ID\":\"003\",\"water3\":\"";
+    String payload = "{\"sensor\":\"lteGW\",\"ID\":\"";
+    payload.concat(sensorID);
+    payload.concat("\",\"water\":\"");
     int water1 = digitalRead( SW_LOW) * 49 + digitalRead( SW_HIGH) * 51; //ここに水位;
     payload.concat(water1);
+    payload.concat("\",\"bootcount\":\"");
+    int bootcount = 0; 
+    payload.concat(bootcount); 
+    payload.concat("\",\"rssi\":\"");
+    int rssi = -100;
+    payload.concat(rssi); 
     // payload.concat(",\"water2\":");
     // int water2 = digitalRead( SECOND_SW_LOW) * 49 + digitalRead( SECOND_SW_HIGH) * 51; //ここに水位;
     // payload.concat(water2);
-    payload.concat("\",\"vbat3\":\"");
+    payload.concat("\",\"vbat\":\"");
     payload.concat(PMU.getBattVoltage()/42.2);
-    payload.concat("\",\"bootCount3\":\"");
-    payload.concat(bootCount);
-    payload.concat("\",\"lat\":\"34.953950\",\"lon\":\"136.935557\"}");
+    payload.concat("\"}");
+    // payload.concat("\",\"bootCount3\":\"");
+    // payload.concat(bootCount);
+    // payload.concat("\",\"lat\":\"34.953950\",\"lon\":\"136.935557\"}");
     Serial.println(payload);
     // AT+SMPUB=<topic>,<content length>,<qos>,<retain><CR>message is enteredQuit edit mode if messagelength equals to <contentlength>
     snprintf(buffer, 1024, "+SMPUB=\"%s\",%d,1,1", topic, payload.length());
@@ -387,6 +399,22 @@ void loop()
             Serial.println("Send Packet failed!");
         }
     }
+    /*********************************
+    * step 6 : Set Modem to sleep mode
+    ***********************************/
+    Serial.print("Set Modem to sleep mode");
+
+    modem.sendAT("+CSCLK=1");
+    if (modem.waitResponse() != 1) {
+        Serial.println("Failed!"); return;
+    }
+    Serial.println("Success!");
+
+    //Pulling up DTR pin, module will go to normal sleep mode
+    // After level conversion, set the DTR Pin output to low, then the module DTR pin is high
+    digitalWrite(BOARD_MODEM_DTR_PIN, HIGH);
+
+    // Wake up Modem after 60 seconds
     deep_sleep();
 
 
