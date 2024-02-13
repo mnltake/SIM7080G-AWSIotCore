@@ -68,11 +68,12 @@ const char gprsUser[] = "";
 const char gprsPass[] = "";
 
 // cayenne server address and port
-const char server[]   = "52.194.74.83";
+// const char server[]   = "52.194.74.83";
+const char server[]   =  "2406:da14:cf4:c600:cb00:4f76:999a:a797";
 const int  port       = 1883;
 const char topic[] = "LTE/SIM7080G02";
 char buffer[1024] = {0};
-const int16_t sensorID = 197;
+const int16_t sensorID = 198;
 // To create a device : https://cayenne.mydevices.com/cayenne/dashboard
 //  1. Add new...
 //  2. Device/Widget
@@ -260,7 +261,7 @@ void setup()
      * step 4 : Set the network mode to NB-IOT
     ***********************************/
     timerWrite(timer, 0);
-    modem.setNetworkMode(38);    //LTE only
+    modem.setNetworkMode(2);    //38:LTE only 2:auto
 
     modem.setPreferredMode(MODEM_CATM);
 
