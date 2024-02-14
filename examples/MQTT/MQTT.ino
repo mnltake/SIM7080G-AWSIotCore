@@ -11,11 +11,49 @@
 #include "XPowersLib.h"
 #include "utilities.h"
 #include <esp_sleep.h>
+//LoRa
+#include "esp32_e220900t22s_jp_lib.h"
+#include <Arduino_JSON.h>
+struct  msgStruct{ 
+    uint8_t conf_0 = 0x00;
+    uint8_t conf_1 = 0x00;
+    uint8_t channel = 0x09;
+    uint16_t sensorID  ;
+    uint16_t water ;
+    int16_t rssi;
+    uint16_t bootcount;
+    volatile int status; /* 0:ready, 1:busy */
+    volatile bool toCloud = false;
+} ;
+
+struct LoRaConfigItem_t config = {
+    0x0000,   // own_address 0
+    0b011,    // baud_rate 9600 bps
+    0b10000,  // air_data_rate SF:9 BW:125
+    0b00,     // subpacket_size 200
+    0b1,      // rssi_ambient_noise_flag 有効
+    0b0,      // transmission_pause_flag 有効
+    0b00,     // transmitting_power 13 dBm
+    0x09,     // own_channel 9
+    0b1,      // rssi_byte_flag 有効
+    0b1,      // transmission_method_type 固定送信モード
+    0b0,      // lbt_flag 有効
+    0b111,    // wor_cycle 4000 ms
+    0x0000,   // encryption_key 0
+    0xFFFF,   // target_address ブロードキャスト
+    0x09      // target_channel 9
+};
+CLoRa lora;
+
+struct RecvFrameE220900T22SJP_t loradata;
+msgStruct msg;
+/** prototype declaration **/
+void LoRaRecvTask(void *pvParameters);
 //WDT
 #include "esp_system.h"
 const int wdtTimeout = 30*1000;  //time in ms to trigger the watchdog
 hw_timer_t *timer = NULL;
-
+const long activeTime = 1*60; //1分
 XPowersPMU  PMU;
 #define SW_LOW 16
 #define SW_HIGH 17
@@ -57,10 +95,9 @@ enum {
     MODEM_CATM_NBIOT,
 };
 
-#define randMax 35
-#define randMin 18
-uint64_t sleepSec = 15*60 - 5;//60min-実行時間5ｓ
-RTC_DATA_ATTR uint16_t bootCount = 0;
+
+uint64_t sleepSec = 60*15;//60min-実行時間5ｓ
+// RTC_DATA_ATTR uint16_t bootCount = 0;
 // const int deepsleep_sec = 10;
 // Your GPRS credentials, if any
 const char apn[] = "povo.jp";
@@ -68,12 +105,12 @@ const char gprsUser[] = "";
 const char gprsPass[] = "";
 
 // cayenne server address and port
-// const char server[]   = "52.194.74.83";
-const char server[]   =  "2406:da14:cf4:c600:cb00:4f76:999a:a797";
+const char server[]   = "52.194.74.83";
+// const char server[]   =  "2406:da14:cf4:c600:cb00:4f76:999a:a797";
 const int  port       = 1883;
 const char topic[] = "LTE/SIM7080G02";
 char buffer[1024] = {0};
-const int16_t sensorID = 198;
+// const int16_t sensorID = 198;
 // To create a device : https://cayenne.mydevices.com/cayenne/dashboard
 //  1. Add new...
 //  2. Device/Widget
@@ -94,6 +131,8 @@ char clientID[] = "SIM7080G";
 //  8. Add Widget
 int data_channel = 0;
 
+void LoRaRecvTask(void *pvParameters);
+void MQTTSendTask(void *pvParameters);
 
 bool isConnect()
 {
@@ -107,23 +146,14 @@ bool isConnect()
 
 void IRAM_ATTR deep_sleep(){
     timerWrite(timer, 0);
-    Serial.println("modem.poweroff");
+    Serial.println("LTE.poweroff");
     modem.sendAT(GF("+CPOWD=1"));
     PMU.disableDC3();
-    Serial.printf("sleep \n");
-
-    // if (bootCount == 0){
-    //     delay(10000);
-    // } 
-    // if (bootCount < 10)
-    // {
-    //     sleepSec = 25;
-    // }
-    
-    // bootCount++;
-
-    // digitalWrite(LED1 ,LOW);
-    esp_sleep_enable_timer_wakeup(sleepSec * 1000 * 1000);
+    Serial.println("lora.poweroff");
+    lora.SwitchToConfigurationMode();
+    PMU.disableDC5();
+    Serial.printf("deelsleep %dsec \n",sleepSec );
+    esp_sleep_enable_timer_wakeup((sleepSec * 1000 )* 1000);
     esp_deep_sleep_start();
 }
 
@@ -353,72 +383,119 @@ void setup()
 
     Serial.println("MQTT Client connected!");
 
+    //LoRa init
+    // E220-900T22S(JP)へのLoRa初期設定
+    PMU.setDC5Voltage(3700);    //LoRa main power channel 1400~ 3700V
+    PMU.enableDC5();
+    if (lora.InitLoRaModule(config)) {
+        SerialMon.printf("Lora init error\n");
+        // return;
+    } else {
+        Serial.printf("Lora init ok\n");
+    }
+    // Mode1　WOR送信モード(M0=0,M1=1)へ移行する
+    SerialMon.printf("switch to Mode1\n");
+    lora.SwitchToWORSendingMode();
+    char msg[1] = { 0 }; //子機を起こすためメッセージは受信されない
+    if (lora.SendFrame(config, (uint8_t *)msg, strlen(msg)) == 0) {
+        SerialMon.printf("send succeeded.\n");
+        SerialMon.printf("\n");
+        } else {
+        SerialMon.printf("send failed.\n");
+        SerialMon.printf("\n");
+        }
+    SerialMon.printf("switch to Mode3\n");
+    lora.SwitchToNormalMode();
+    SerialLoRa.flush();
 
+    xTaskCreateUniversal(LoRaRecvTask, "LoRaRecvTask", 8192, NULL, 1, NULL,
+                       APP_CPU_NUM);
+    xTaskCreateUniversal(MQTTSendTask, "MQTTSendTask", 8192, NULL, 1, NULL,
+                       APP_CPU_NUM);
 }
 
 void loop()
 {
-    // if (!isConnect()) {
-    //     Serial.println("MQTT Client disconnect!"); delay(1000);
-    //     return ;
-    // }
-    timerWrite(timer, 0);
-    Serial.println();
-    // Publish fake temperature data
-    String payload = "{\"sensor\":\"lteGW\",\"ID\":\"";
-    payload.concat(sensorID);
-    payload.concat("\",\"water\":\"");
-    int water1 = digitalRead( SW_LOW) * 49 + digitalRead( SW_HIGH) * 51; //ここに水位;
-    payload.concat(water1);
-    payload.concat("\",\"bootcount\":\"");
-    int bootcount = 0; 
-    payload.concat(bootcount); 
-    payload.concat("\",\"rssi\":\"");
-    int rssi = -100;
-    payload.concat(rssi); 
-    // payload.concat(",\"water2\":");
-    // int water2 = digitalRead( SECOND_SW_LOW) * 49 + digitalRead( SECOND_SW_HIGH) * 51; //ここに水位;
-    // payload.concat(water2);
-    payload.concat("\",\"vbat\":\"");
-    payload.concat(PMU.getBattVoltage()/42.2);
-    payload.concat("\"}");
-    // payload.concat("\",\"bootCount3\":\"");
-    // payload.concat(bootCount);
-    // payload.concat("\",\"lat\":\"34.953950\",\"lon\":\"136.935557\"}");
-    Serial.println(payload);
-    // AT+SMPUB=<topic>,<content length>,<qos>,<retain><CR>message is enteredQuit edit mode if messagelength equals to <contentlength>
-    snprintf(buffer, 1024, "+SMPUB=\"%s\",%d,1,1", topic, payload.length());
-    modem.sendAT(buffer);
-    if (modem.waitResponse(">") == 1) {
-        modem.stream.write(payload.c_str(), payload.length());
-        Serial.print("Try publish payload: ");
-        Serial.println(payload);
+    delay(1000);
+}
 
-        if (modem.waitResponse(3000)) {
-            Serial.println("Send Packet success!");
-        } else {
-            Serial.println("Send Packet failed!");
+void LoRaRecvTask(void *pvParameters) {
+    while (1) {
+        int  ret;
+        if (lora.RecieveFrame(&loradata) == 0) {
+            SerialMon.printf("Lora recv data:\n");
+            SerialMon.printf("hex dump:\n");
+            for (int i = 0; i < loradata.recv_data_len; i++) {
+                SerialMon.printf("%02x ", loradata.recv_data[i]);
+            }
+            SerialMon.println();
+            msg.sensorID = loradata.recv_data[0] | (loradata.recv_data[1]<<8) ;
+            msg.water = loradata.recv_data[2] | (loradata.recv_data[3]<<8) ;
+            msg.bootcount = loradata.recv_data[4] | (loradata.recv_data[5]<<8) ;
+            msg.rssi = loradata.rssi;
+
+            if (msg.status == 0) {
+                /* status -> busy */
+                msg.status = 1;
+                msg.toCloud  = true;
+            }
         }
     }
-    /*********************************
-    * step 6 : Set Modem to sleep mode
-    ***********************************/
-    Serial.print("Set Modem to sleep mode");
+  }
 
-    modem.sendAT("+CSCLK=1");
-    if (modem.waitResponse() != 1) {
-        Serial.println("Failed!"); return;
+void MQTTSendTask(void *pvParameters) {
+    while (1) {
+        if (msg.toCloud ){
+        JSONVar  msgJson;
+        msg.status =1;
+        msgJson["sensor"] = "lteGW";
+        msgJson["ID"] = String(msg.sensorID );
+        msgJson["water"] = msg.water;
+        msgJson["bootcount"] = msg.bootcount;
+        msgJson["rssi"] = msg.rssi;
+        msgJson["vbat"] = int(PMU.getBattVoltage());
+        msgJson["GWname"] = clientID;
+        String payload = JSON.stringify(msgJson);
+        Serial.println(payload);
+        msg.status =0;
+        // AT+SMPUB=<topic>,<content length>,<qos>,<retain><CR>message is enteredQuit edit mode if messagelength equals to <contentlength>
+        snprintf(buffer, 1024, "+SMPUB=\"%s\",%d,1,1", topic, payload.length());
+        modem.sendAT(buffer);
+        if (modem.waitResponse(">") == 1) {
+            modem.stream.write(payload.c_str(), payload.length());
+            Serial.print("Try publish payload: ");
+            Serial.println(payload);
+
+            if (modem.waitResponse(3000)) {
+                Serial.println("Send Packet success!");
+
+            } else {
+                Serial.println("Send Packet failed!");
+            }
+        }
+        msg.toCloud  =false;
+        }
+        // activeTimeを超えたらDeepsleep
+        if (millis() > activeTime*1000) { 
+
+            // /*********************************
+            // * step 6 : Set Modem to sleep mode
+            // ***********************************/
+            // Serial.print("Set Modem to sleep mode");
+
+            // modem.sendAT("+CSCLK=1");
+            // if (modem.waitResponse() != 1) {
+            //     Serial.println("Failed!"); return;
+            // }
+            // Serial.println("Success!");
+
+            //Pulling up DTR pin, module will go to normal sleep mode
+            // After level conversion, set the DTR Pin output to low, then the module DTR pin is high
+            // digitalWrite(BOARD_MODEM_DTR_PIN, HIGH);
+
+
+            deep_sleep();
+        }
     }
-    Serial.println("Success!");
-
-    //Pulling up DTR pin, module will go to normal sleep mode
-    // After level conversion, set the DTR Pin output to low, then the module DTR pin is high
-    digitalWrite(BOARD_MODEM_DTR_PIN, HIGH);
-
-    // Wake up Modem after 60 seconds
-    deep_sleep();
-
-
-    // esp_deep_sleep_start(); 
 }
 
