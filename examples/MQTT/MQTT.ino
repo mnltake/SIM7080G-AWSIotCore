@@ -32,12 +32,10 @@ struct LoRaConfigItem_t config = {
     0b10000,  // air_data_rate SF:9 BW:125
     0b00,     // subpacket_size 200
     0b1,      // rssi_ambient_noise_flag 有効
-    0b0,      // transmission_pause_flag 有効
     0b00,     // transmitting_power 13 dBm
     0x09,     // own_channel 9
     0b1,      // rssi_byte_flag 有効
     0b1,      // transmission_method_type 固定送信モード
-    0b0,      // lbt_flag 有効
     0b111,    // wor_cycle 4000 ms
     0x0000,   // encryption_key 0
     0xFFFF,   // target_address ブロードキャスト

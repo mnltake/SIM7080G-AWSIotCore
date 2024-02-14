@@ -3,11 +3,10 @@
 
 SemaphoreHandle_t xMutex;
 
-template <typename T>
+template<typename T>
 bool ConfRange(T target, T min, T max);
 
-int CLoRa::LoadConfigSetting(const char *filename,
-                             struct LoRaConfigItem_t &config) {
+int CLoRa::LoadConfigSetting(const char *filename, struct LoRaConfigItem_t &config) {
   int ret = 0;
 
   if (!SPIFFS.begin(true)) {
@@ -37,15 +36,13 @@ int CLoRa::InitLoRaModule(struct LoRaConfigItem_t &config) {
   xSemaphoreGive(xMutex);
 
   // コンフィグモード(M0=1,M1=1)へ移行する
+  SerialMon.printf("switch to configuration mode\n");
   SwitchToConfigurationMode();
-  SerialLoRa.flush();
-  SerialLoRa.end(); // end()を実行　←←追加
-  delay(1000); // 1秒待つ　 ←←追加
-  SerialLoRa.begin(LoRa_BaudRate, SERIAL_8N1, LoRa_RxPin_MCU_TxPin, LoRa_TxPin_MCU_RxPin);
-  delay(100); 
-  SerialLoRa.read();
+
+SerialLoRa.begin(LoRa_BaudRate, SERIAL_8N1, LoRa_RxPin_MCU_TxPin, LoRa_TxPin_MCU_RxPin);
+
   // Configuration
-  std::vector<uint8_t> command = {0xc0, 0x00, 0x08};
+  std::vector<uint8_t> command = { 0xc0, 0x00, 0x08 };
   std::vector<uint8_t> response = {};
 
   // Register Address 00H, 01H
@@ -64,7 +61,6 @@ int CLoRa::InitLoRaModule(struct LoRaConfigItem_t &config) {
   uint8_t REG1 = 0;
   REG1 = REG1 | (config.subpacket_size << 6);
   REG1 = REG1 | (config.rssi_ambient_noise_flag << 5);
-  REG1 = REG1 | (config.transmission_pause_flag << 4);
   REG1 = REG1 | (config.transmitting_power);
   command.push_back(REG1);
 
@@ -76,7 +72,6 @@ int CLoRa::InitLoRaModule(struct LoRaConfigItem_t &config) {
   uint8_t REG3 = 0;
   REG3 = REG3 | (config.rssi_byte_flag << 7);
   REG3 = REG3 | (config.transmission_method_type << 6);
-  REG3 = REG3 | (config.lbt_flag << 4);
   REG3 = REG3 | (config.wor_cycle);
   command.push_back(REG3);
 
@@ -85,6 +80,15 @@ int CLoRa::InitLoRaModule(struct LoRaConfigItem_t &config) {
   uint8_t CRYPT_L = config.encryption_key & 0xff;
   command.push_back(CRYPT_H);
   command.push_back(CRYPT_L);
+
+  for (auto i : command) {
+    SerialLoRa.write(i);
+  }
+  SerialLoRa.flush();
+  delay(100);
+  while (SerialLoRa.available()) {
+    SerialLoRa.read();
+  }
 
   SerialMon.printf("# Command Request\n");
   for (auto i : command) {
@@ -127,8 +131,7 @@ int CLoRa::RecieveFrame(struct RecvFrameE220900T22SJP_t *recv_frame) {
   int len = 0;
   uint8_t *start_p = recv_frame->recv_data;
 
-  memset(recv_frame->recv_data, 0x00,
-         sizeof(recv_frame->recv_data) / sizeof(recv_frame->recv_data[0]));
+  memset(recv_frame->recv_data, 0x00, sizeof(recv_frame->recv_data) / sizeof(recv_frame->recv_data[0]));
 
   while (1) {
     while (SerialLoRa.available()) {
@@ -156,25 +159,24 @@ int CLoRa::RecieveFrame(struct RecvFrameE220900T22SJP_t *recv_frame) {
   return 0;
 }
 
-int CLoRa::SendFrame(struct LoRaConfigItem_t &config, uint8_t *send_data,
-                     int size) {
+int CLoRa::SendFrame(struct LoRaConfigItem_t &config, uint8_t *send_data, int size) {
   uint8_t subpacket_size = 0;
   switch (config.subpacket_size) {
-  case 0b00:
-    subpacket_size = 200;
-    break;
-  case 0b01:
-    subpacket_size = 128;
-    break;
-  case 0b10:
-    subpacket_size = 64;
-    break;
-  case 0b11:
-    subpacket_size = 32;
-    break;
-  default:
-    subpacket_size = 200;
-    break;
+    case 0b00:
+      subpacket_size = 200;
+      break;
+    case 0b01:
+      subpacket_size = 128;
+      break;
+    case 0b10:
+      subpacket_size = 64;
+      break;
+    case 0b11:
+      subpacket_size = 32;
+      break;
+    default:
+      subpacket_size = 200;
+      break;
   }
   if (size > subpacket_size) {
     SerialMon.printf("send data length too long\n");
@@ -184,8 +186,7 @@ int CLoRa::SendFrame(struct LoRaConfigItem_t &config, uint8_t *send_data,
   uint8_t target_address_L = config.target_address & 0xff;
   uint8_t target_channel = config.target_channel;
 
-  uint8_t frame[3 + size] = {target_address_H, target_address_L,
-                             target_channel};
+  uint8_t frame[3 + size] = { target_address_H, target_address_L, target_channel };
 
   memmove(frame + 3, send_data, size);
 
@@ -205,13 +206,13 @@ int CLoRa::SendFrame(struct LoRaConfigItem_t &config, uint8_t *send_data,
       SerialLoRa.write(i);
     }
     SerialLoRa.flush();
-    delay(100);
-    while (SerialLoRa.available()) {
-      while (SerialLoRa.available()) {
-        SerialLoRa.read();
-      }
-      delay(100);
-    }
+    // delay(100);
+    // while (SerialLoRa.available()) {
+    //   while (SerialLoRa.available()) {
+    //     SerialLoRa.read();
+    //   }
+    //   delay(100);
+    // }
     xSemaphoreGive(xMutex);
   }
 
@@ -256,27 +257,25 @@ void CLoRa::SwitchToConfigurationMode(void) {
 
 void CLoRa::SetDefaultConfigValue(struct LoRaConfigItem_t &config) {
   const LoRaConfigItem_t default_config = {
-      0x0000, // own_address 0
-      0b011, // baud_rate 9600 bps
-      0b10000, // air_data_rate SF:9 BW:125
-      0b00, // subpacket_size 200
-      0b1, // rssi_ambient_noise_flag 有効
-      0b0, // transmission_pause_flag 有効
-      0b01, // transmitting_power 13 dBm
-      0x00, // own_channel 0
-      0b1, // rssi_byte_flag 有効
-      0b1, // transmission_method_type 固定送信モード
-      0b0, // lbt_flag 有効
-      0b011, // wor_cycle 2000 ms
-      0x0000, // encryption_key 0
-      0x0000, // target_address 0
-      0x00}; // target_channel 0
+    0x0000,   // own_address 0
+    0b011,    // baud_rate 9600 bps
+    0b10000,  // air_data_rate SF:9 BW:125
+    0b00,     // subpacket_size 200
+    0b1,      // rssi_ambient_noise_flag 有効
+    0b00,     // transmitting_power 13 dBm
+    0x00,     // own_channel 0
+    0b1,      // rssi_byte_flag 有効
+    0b1,      // transmission_method_type 固定送信モード
+    0b011,    // wor_cycle 2000 ms
+    0x0000,   // encryption_key 0
+    0x0000,   // target_address 0
+    0x00      // target_channel 0
+  };
 
   config = default_config;
 }
 
-int CLoRa::OpenConfigFile(const char *filename,
-                          struct LoRaConfigItem_t &config) {
+int CLoRa::OpenConfigFile(const char *filename, struct LoRaConfigItem_t &config) {
   int ret = 0;
 
   // フラッシュメモリのファイルを開く
@@ -344,7 +343,7 @@ int CLoRa::ReadConfigValue(const char *key, const char *val) {
 }
 
 // コンフィグ値が設定範囲内か否か
-template <typename T>
+template<typename T>
 bool ConfRange(T target, T min, T max) {
   if (target >= min && target <= max) {
     return true;
@@ -367,221 +366,230 @@ int CLoRa::SetConfigValue(struct LoRaConfigItem_t &config) {
 
   // baud_rate
   switch (baud_rate_val) {
-  case 1200:
-    config.baud_rate = 0b000;
-    break;
-  case 2400:
-    config.baud_rate = 0b001;
-    break;
-  case 4800:
-    config.baud_rate = 0b010;
-    break;
-  case 9600:
-    config.baud_rate = 0b011;
-    break;
-  case 19200:
-    config.baud_rate = 0b100;
-    break;
-  case 38400:
-    config.baud_rate = 0b101;
-    break;
-  case 57600:
-    config.baud_rate = 0b110;
-    break;
-  case 115200:
-    config.baud_rate = 0b111;
-    break;
-  default:
-    err = 1;
-    SerialMon.printf("baud_rate invalid value.\n");
-    SerialMon.printf("default baud_rate value is used.\n");
-    break;
+    case 1200:
+      config.baud_rate = 0b000;
+      break;
+    case 2400:
+      config.baud_rate = 0b001;
+      break;
+    case 4800:
+      config.baud_rate = 0b010;
+      break;
+    case 9600:
+      config.baud_rate = 0b011;
+      break;
+    case 19200:
+      config.baud_rate = 0b100;
+      break;
+    case 38400:
+      config.baud_rate = 0b101;
+      break;
+    case 57600:
+      config.baud_rate = 0b110;
+      break;
+    case 115200:
+      config.baud_rate = 0b111;
+      break;
+    default:
+      err = 1;
+      SerialMon.printf("baud_rate invalid value.\n");
+      SerialMon.printf("default baud_rate value is used.\n");
+      break;
   }
 
   // air_data_rate
   switch (bw_val) {
-  case 125:
-    switch (sf_val) {
-    case 5:
-      config.air_data_rate = 0b00000;
+    case 125:
+      switch (sf_val) {
+        case 5:
+          config.air_data_rate = 0b00000;
+          break;
+        case 6:
+          config.air_data_rate = 0b00100;
+          break;
+        case 7:
+          config.air_data_rate = 0b01000;
+          break;
+        case 8:
+          config.air_data_rate = 0b01100;
+          break;
+        case 9:
+          config.air_data_rate = 0b10000;
+          break;
+        default:
+          err = 1;
+          SerialMon.printf("sf invalid value.\n");
+          SerialMon.printf("default sf value is used.\n");
+          break;
+      }
       break;
-    case 6:
-      config.air_data_rate = 0b00100;
+    case 250:
+      switch (sf_val) {
+        case 5:
+          config.air_data_rate = 0b00001;
+          break;
+        case 6:
+          config.air_data_rate = 0b00101;
+          break;
+        case 7:
+          config.air_data_rate = 0b01001;
+          break;
+        case 8:
+          config.air_data_rate = 0b01101;
+          break;
+        case 9:
+          config.air_data_rate = 0b10001;
+          break;
+        case 10:
+          config.air_data_rate = 0b10101;
+          break;
+        default:
+          err = 1;
+          SerialMon.printf("sf invalid value.\n");
+          SerialMon.printf("default sf value is used.\n");
+          break;
+      }
       break;
-    case 7:
-      config.air_data_rate = 0b01000;
-      break;
-    case 8:
-      config.air_data_rate = 0b01100;
-      break;
-    case 9:
-      config.air_data_rate = 0b10000;
+    case 500:
+      switch (sf_val) {
+        case 5:
+          config.air_data_rate = 0b00010;
+          break;
+        case 6:
+          config.air_data_rate = 0b00110;
+          break;
+        case 7:
+          config.air_data_rate = 0b01010;
+          break;
+        case 8:
+          config.air_data_rate = 0b01110;
+          break;
+        case 9:
+          config.air_data_rate = 0b10010;
+          break;
+        case 10:
+          config.air_data_rate = 0b10110;
+          break;
+        case 11:
+          config.air_data_rate = 0b11010;
+          break;
+        default:
+          err = 1;
+          SerialMon.printf("sf invalid value.\n");
+          SerialMon.printf("default sf value is used.\n");
+          break;
+      }
       break;
     default:
       err = 1;
-      SerialMon.printf("sf invalid value.\n");
-      SerialMon.printf("default sf value is used.\n");
+      SerialMon.printf("bw invalid value.\n");
+      SerialMon.printf("default bw and sf value is used.\n");
       break;
-    }
-    break;
-  case 250:
-    switch (sf_val) {
-    case 5:
-      config.air_data_rate = 0b00001;
-      break;
-    case 6:
-      config.air_data_rate = 0b00101;
-      break;
-    case 7:
-      config.air_data_rate = 0b01001;
-      break;
-    case 8:
-      config.air_data_rate = 0b01101;
-      break;
-    case 9:
-      config.air_data_rate = 0b10001;
-      break;
-    case 10:
-      config.air_data_rate = 0b10101;
-      break;
-    default:
-      err = 1;
-      SerialMon.printf("sf invalid value.\n");
-      SerialMon.printf("default sf value is used.\n");
-      break;
-    }
-    break;
-  case 500:
-    switch (sf_val) {
-    case 5:
-      config.air_data_rate = 0b00010;
-      break;
-    case 6:
-      config.air_data_rate = 0b00110;
-      break;
-    case 7:
-      config.air_data_rate = 0b01010;
-      break;
-    case 8:
-      config.air_data_rate = 0b01110;
-      break;
-    case 9:
-      config.air_data_rate = 0b10010;
-      break;
-    case 10:
-      config.air_data_rate = 0b10110;
-      break;
-    case 11:
-      config.air_data_rate = 0b11010;
-      break;
-    default:
-      err = 1;
-      SerialMon.printf("sf invalid value.\n");
-      SerialMon.printf("default sf value is used.\n");
-      break;
-    }
-    break;
-  default:
-    err = 1;
-    SerialMon.printf("bw invalid value.\n");
-    SerialMon.printf("default bw and sf value is used.\n");
-    break;
   }
 
   // subpacket_size
   switch (subpacket_size_val) {
-  case 200:
-    config.subpacket_size = 0b00;
-    break;
-  case 128:
-    config.subpacket_size = 0b01;
-    break;
-  case 64:
-    config.subpacket_size = 0b10;
-    break;
-  case 32:
-    config.subpacket_size = 0b11;
-    break;
-  default:
-    err = 1;
-    SerialMon.printf("subpacket_size invalid value.\n");
-    SerialMon.printf("default subpacket_size value is used.\n");
-    break;
+    case 200:
+      config.subpacket_size = 0b00;
+      break;
+    case 128:
+      config.subpacket_size = 0b01;
+      break;
+    case 64:
+      config.subpacket_size = 0b10;
+      break;
+    case 32:
+      config.subpacket_size = 0b11;
+      break;
+    default:
+      err = 1;
+      SerialMon.printf("subpacket_size invalid value.\n");
+      SerialMon.printf("default subpacket_size value is used.\n");
+      break;
   }
 
   // transmitting_power
   switch (transmitting_power_val) {
-  case 13:
-    config.transmitting_power = 0b01;
-    break;
-  case 7:
-    config.transmitting_power = 0b10;
-    break;
-  case 0:
-    config.transmitting_power = 0b11;
-    break;
-  default:
-    err = 1;
-    SerialMon.printf("transmitting_power invalid value.\n");
-    SerialMon.printf("default transmitting_power value is used.\n");
-    break;
+    case 13:
+      config.transmitting_power = 0b00;
+      break;
+    case 12:
+      config.transmitting_power = 0b01;
+      break;
+    case 7:
+      config.transmitting_power = 0b10;
+      break;
+    case 0:
+      config.transmitting_power = 0b11;
+      break;
+    default:
+      err = 1;
+      SerialMon.printf("transmitting_power invalid value.\n");
+      SerialMon.printf("default transmitting_power value is used.\n");
+      break;
   }
 
   // own_channel
   switch (bw_val) {
-  case 125:
-    if (ConfRange((int)own_channel_val, 0, 37)) {
-      config.own_channel = own_channel_val;
-    } else {
+    case 125:
+      if (ConfRange((int)own_channel_val, 0, 37)) {
+        config.own_channel = own_channel_val;
+      } else {
+        err = 1;
+        SerialMon.printf("own_channel invalid value.\n");
+        SerialMon.printf("default own_channel value is used.\n");
+      }
+      break;
+    case 250:
+      if (ConfRange((int)own_channel_val, 0, 36)) {
+        config.own_channel = own_channel_val;
+      } else {
+        err = 1;
+        SerialMon.printf("own_channel invalid value.\n");
+        SerialMon.printf("default own_channel value is used.\n");
+      }
+      break;
+    case 500:
+      if (ConfRange((int)own_channel_val, 0, 30)) {
+        config.own_channel = own_channel_val;
+      } else {
+        err = 1;
+        SerialMon.printf("own_channel invalid value.\n");
+        SerialMon.printf("default own_channel value is used.\n");
+      }
+      break;
+    default:
       err = 1;
-      SerialMon.printf("own_channel invalid value.\n");
+      SerialMon.printf("bw invalid value.\n");
       SerialMon.printf("default own_channel value is used.\n");
-    }
-    break;
-  case 250:
-    if (ConfRange((int)own_channel_val, 0, 36)) {
-      config.own_channel = own_channel_val;
-    } else {
-      err = 1;
-      SerialMon.printf("own_channel invalid value.\n");
-      SerialMon.printf("default own_channel value is used.\n");
-    }
-    break;
-  case 500:
-    if (ConfRange((int)own_channel_val, 0, 30)) {
-      config.own_channel = own_channel_val;
-    } else {
-      err = 1;
-      SerialMon.printf("own_channel invalid value.\n");
-      SerialMon.printf("default own_channel value is used.\n");
-    }
-    break;
-  default:
-    err = 1;
-    SerialMon.printf("bw invalid value.\n");
-    SerialMon.printf("default own_channel value is used.\n");
-    break;
+      break;
   }
 
   // wor_cycle
   switch (wor_cycle_val) {
-  case 500:
-    config.wor_cycle = 0b000;
-    break;
-  case 1000:
-    config.wor_cycle = 0b001;
-    break;
-  case 1500:
-    config.wor_cycle = 0b010;
-    break;
-  case 2000:
-    config.wor_cycle = 0b011;
-    break;
-  default:
-    err = 1;
-    SerialMon.printf("wor_cycle invalid value.\n");
-    SerialMon.printf("default wor_cycle value is used.\n");
-    break;
+    case 500:
+      config.wor_cycle = 0b000;
+      break;
+    case 1000:
+      config.wor_cycle = 0b001;
+      break;
+    case 1500:
+      config.wor_cycle = 0b010;
+      break;
+    case 2000:
+      config.wor_cycle = 0b011;
+      break;
+    case 2500:
+      config.wor_cycle = 0b100;
+      break;
+    case 3000:
+      config.wor_cycle = 0b101;
+      break;
+    default:
+      err = 1;
+      SerialMon.printf("wor_cycle invalid value.\n");
+      SerialMon.printf("default wor_cycle value is used.\n");
+      break;
   }
 
   // encryption_key
@@ -604,38 +612,38 @@ int CLoRa::SetConfigValue(struct LoRaConfigItem_t &config) {
 
   // target_channel
   switch (bw_val) {
-  case 125:
-    if (ConfRange((int)target_channel_val, 0, 37)) {
-      config.target_channel = target_channel_val;
-    } else {
+    case 125:
+      if (ConfRange((int)target_channel_val, 0, 37)) {
+        config.target_channel = target_channel_val;
+      } else {
+        err = 1;
+        SerialMon.printf("target_channel invalid value.\n");
+        SerialMon.printf("default target_channel value is used.\n");
+      }
+      break;
+    case 250:
+      if (ConfRange((int)target_channel_val, 0, 36)) {
+        config.target_channel = target_channel_val;
+      } else {
+        err = 1;
+        SerialMon.printf("target_channel_val invalid value.\n");
+        SerialMon.printf("default target_channel_val value is used.\n");
+      }
+      break;
+    case 500:
+      if (ConfRange((int)target_channel_val, 0, 30)) {
+        config.target_channel = target_channel_val;
+      } else {
+        err = 1;
+        SerialMon.printf("target_channel_val invalid value.\n");
+        SerialMon.printf("default target_channel_val value is used.\n");
+      }
+      break;
+    default:
       err = 1;
-      SerialMon.printf("target_channel invalid value.\n");
-      SerialMon.printf("default target_channel value is used.\n");
-    }
-    break;
-  case 250:
-    if (ConfRange((int)target_channel_val, 0, 36)) {
-      config.target_channel = target_channel_val;
-    } else {
-      err = 1;
-      SerialMon.printf("target_channel_val invalid value.\n");
+      SerialMon.printf("bw invalid value.\n");
       SerialMon.printf("default target_channel_val value is used.\n");
-    }
-    break;
-  case 500:
-    if (ConfRange((int)target_channel_val, 0, 30)) {
-      config.target_channel = target_channel_val;
-    } else {
-      err = 1;
-      SerialMon.printf("target_channel_val invalid value.\n");
-      SerialMon.printf("default target_channel_val value is used.\n");
-    }
-    break;
-  default:
-    err = 1;
-    SerialMon.printf("bw invalid value.\n");
-    SerialMon.printf("default target_channel_val value is used.\n");
-    break;
+      break;
   }
 
   return err;

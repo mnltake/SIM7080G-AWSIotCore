@@ -1,9 +1,7 @@
-#ifndef __ESP32_E220900T22S_JP_LIB_H__
-#define __ESP32_E220900T22S_JP_LIB_H__
+#pragma once
 
 #include <Arduino.h>
 #include <SPIFFS.h>
-
 
 // Set serial for debug console (to the Serial Monitor)
 #define SerialMon Serial
@@ -30,12 +28,10 @@ struct LoRaConfigItem_t {
   uint8_t air_data_rate;
   uint8_t subpacket_size;
   uint8_t rssi_ambient_noise_flag;
-  uint8_t transmission_pause_flag;
   uint8_t transmitting_power;
   uint8_t own_channel;
   uint8_t rssi_byte_flag;
   uint8_t transmission_method_type;
-  uint8_t lbt_flag;
   uint16_t wor_cycle;
   uint16_t encryption_key;
   uint16_t target_address;
@@ -57,6 +53,12 @@ public:
    * @return 0:成功 1:失敗
    */
   int LoadConfigSetting(const char *filename, struct LoRaConfigItem_t &config);
+
+  /**
+   * @brief E220-900T22S(JP)のLoRa設定値をデフォルトの値にセット
+   * @param config LoRa設定値の格納先
+   */
+  void SetDefaultConfigValue(struct LoRaConfigItem_t &config);
 
   /**
    * @brief E220-900T22S(JP)へLoRa初期設定を行う
@@ -114,10 +116,7 @@ private:
   uint16_t target_address_val;
   uint8_t target_channel_val;
 
-  void SetDefaultConfigValue(struct LoRaConfigItem_t &config);
   int OpenConfigFile(const char *filename, struct LoRaConfigItem_t &config);
   int ReadConfigValue(const char *key, const char *val);
   int SetConfigValue(struct LoRaConfigItem_t &config);
 };
-
-#endif
