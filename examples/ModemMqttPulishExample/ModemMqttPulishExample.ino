@@ -7,7 +7,7 @@
  *
  */
 #include <Arduino.h>
-#define XPOWERS_CHIP_AXP2102
+#define XPOWERS_CHIP_AXP2101
 #include "XPowersLib.h"
 #include "utilities.h"
 
@@ -114,6 +114,14 @@ void setup()
             delay(5000);
         }
     }
+
+    // If it is a power cycle, turn off the modem power. Then restart it
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED ) {
+        PMU.disableDC3();
+        // Wait a minute
+        delay(200);
+    }
+
     //Set the working voltage of the modem, please do not modify the parameters
     PMU.setDC3Voltage(3000);    //SIM7080 Modem main power channel 2700~ 3400V
     PMU.enableDC3();
@@ -183,7 +191,7 @@ void setup()
     /*********************************
     * step 5 : Wait for the network registration to succeed
     ***********************************/
-    RegStatus s;
+    SIM70xxRegStatus s;
     do {
         s = modem.getRegistrationStatus();
         if (s != REG_OK_HOME && s != REG_OK_ROAMING) {
@@ -249,15 +257,16 @@ void setup()
         return;
     }
 
+    int8_t ret;
     do {
 
         modem.sendAT("+SMCONN");
-        res = modem.waitResponse(30000);
-        if (!res) {
+        ret = modem.waitResponse(30000);
+        if (ret != 1) {
             Serial.println("Connect failed, retry connect ..."); delay(1000);
         }
 
-    } while (res != 1);
+    } while (ret != 1);
 
     Serial.println("MQTT Client connected!");
 

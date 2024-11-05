@@ -215,6 +215,13 @@ public:
 
 #endif
 
+    XPowersAXP2101(uint8_t addr, iic_fptr_t readRegCallback, iic_fptr_t writeRegCallback)
+    {
+        thisReadRegCallback = readRegCallback;
+        thisWriteRegCallback = writeRegCallback;
+        __addr = addr;
+    }
+
     XPowersAXP2101()
     {
 #if defined(ARDUINO)
@@ -231,6 +238,17 @@ public:
         deinit();
     }
 
+#if defined(ARDUINO)
+    bool init(TwoWire &w, int sda = SDA, int scl = SCL, uint8_t addr = AXP2101_SLAVE_ADDRESS)
+    {
+        __wire = &w;
+        __sda = sda;
+        __scl = scl;
+        __addr = addr;
+        return begin();
+    }
+#endif
+
     bool init()
     {
         return begin();
@@ -246,8 +264,8 @@ public:
      */
     uint16_t status()
     {
-        uint8_t status1 = readRegister(XPOWERS_AXP2101_STATUS1);
-        uint8_t status2 = readRegister(XPOWERS_AXP2101_STATUS2);
+        uint16_t status1 = readRegister(XPOWERS_AXP2101_STATUS1) & 0x1F;
+        uint16_t status2 = readRegister(XPOWERS_AXP2101_STATUS2) & 0x1F;;
         return (status1 << 8) | (status2);
     }
 
@@ -269,17 +287,17 @@ public:
 
     bool isBatInActiveModeState(void)
     {
-        return  getRegisterBit(XPOWERS_AXP2101_STATUS1, 3);
+        return  getRegisterBit(XPOWERS_AXP2101_STATUS1, 2);
     }
 
     bool getThermalRegulationStatus(void)
     {
-        return  getRegisterBit(XPOWERS_AXP2101_STATUS1, 2);
+        return  getRegisterBit(XPOWERS_AXP2101_STATUS1, 1);
     }
 
     bool getCurrnetLimitStatus(void)
     {
-        return getRegisterBit(XPOWERS_AXP2101_STATUS1, 1);
+        return getRegisterBit(XPOWERS_AXP2101_STATUS1, 0);
     }
 
     bool isCharging(void)
@@ -314,7 +332,7 @@ public:
 
     xpowers_chg_status_t getChargerStatus(void)
     {
-        int val = readRegister(XPOWERS_AXP2101_THE_REGU_THRES_SET);
+        int val = readRegister(XPOWERS_AXP2101_STATUS2);
         if (val == -1)return XPOWERS_AXP2101_CHG_STOP_STATE;
         val &= 0x07;
         return (xpowers_chg_status_t)val;
@@ -424,7 +442,7 @@ public:
 
     void disableBatfetDieOverTempDetect(void)
     {
-        setRegisterBit(XPOWERS_AXP2101_BATFET_CTRL, 0);
+        clrRegisterBit(XPOWERS_AXP2101_BATFET_CTRL, 0);
     }
 
     /**
@@ -450,7 +468,7 @@ public:
 
     void disableDieOverTempDetect(void)
     {
-        setRegisterBit(XPOWERS_AXP2101_DIE_TEMP_CTRL, 0);
+        clrRegisterBit(XPOWERS_AXP2101_DIE_TEMP_CTRL, 0);
     }
 
     // Linear Charger Vsys voltage dpm
@@ -653,27 +671,38 @@ public:
     }
 
     /**
-     * @brief Low battery warning threshold 5-20%, 1% per step
+     * @brief  Low battery warning threshold 5-20%, 1% per step
+     * @param  percentage:   5 ~ 20
+     * @retval None
      */
-    void setLowBatWarnThreshold(uint8_t opt)
+    void setLowBatWarnThreshold(uint8_t percentage)
     {
+        if (percentage < 5 || percentage > 20)return;
         int val = readRegister(XPOWERS_AXP2101_LOW_BAT_WARN_SET);
         if (val == -1)return;
         val &= 0x0F;
-        writeRegister(XPOWERS_AXP2101_LOW_BAT_WARN_SET, val | (opt << 4));
+        writeRegister(XPOWERS_AXP2101_LOW_BAT_WARN_SET, val | ((percentage - 5) << 4));
     }
 
     uint8_t getLowBatWarnThreshold(void)
     {
-        return (readRegister(XPOWERS_AXP2101_LOW_BAT_WARN_SET) & 0xF0) >> 4;
+        int val = readRegister(XPOWERS_AXP2101_LOW_BAT_WARN_SET);
+        if (val == -1)return 0;
+        val &= 0xF0;
+        val >>= 4;
+        return val;
     }
 
     /**
-     * @brief Low battery shutdown threshold 0-15%, 1% per step
+     * @brief  Low battery shutdown threshold 0-15%, 1% per step
+     * @param  opt:   0 ~ 15
+     * @retval None
      */
-
     void setLowBatShutdownThreshold(uint8_t opt)
     {
+        if (opt > 15) {
+            opt = 15;
+        }
         int val = readRegister(XPOWERS_AXP2101_LOW_BAT_WARN_SET);
         if (val == -1)return;
         val &= 0xF0;
@@ -796,22 +825,26 @@ public:
         clrRegisterBit(XPOWERS_AXP2101_PWROFF_EN, 2);
     }
 
-    void enablePwrOnOverVolOffLevelPowerOff()
+    // CHANGE:  void enablePwrOnOverVolOffLevelPowerOff()
+    void enableLongPressShutdown()
     {
         setRegisterBit(XPOWERS_AXP2101_PWROFF_EN, 1);
     }
 
-    void disablePwrOnOverVolOffLevelPowerOff()
+    // CHANGE:  void disablePwrOnOverVolOffLevelPowerOff()
+    void disableLongPressShutdown()
     {
         clrRegisterBit(XPOWERS_AXP2101_PWROFF_EN, 1);
     }
 
-    void enablePwrOffSelectFunction()
+    //CHANGE: void enablePwrOffSelectFunction()
+    void setLongPressRestart()
     {
         setRegisterBit(XPOWERS_AXP2101_PWROFF_EN, 0);
     }
 
-    void disablePwrOffSelectFunction()
+    //CHANGE: void disablePwrOffSelectFunction()
+    void setLongPressPowerOFF()
     {
         clrRegisterBit(XPOWERS_AXP2101_PWROFF_EN, 0);
     }
@@ -969,8 +1002,8 @@ public:
     {
         int val = readRegister(XPOWERS_AXP2101_SLEEP_WAKEUP_CTRL);
         if (val == -1)return;
-        enable ? (val | opt) : (val & (~opt));
-        writeRegister(XPOWERS_AXP2101_SLEEP_WAKEUP_CTRL, val | opt);
+        enable ? (val |= opt) : (val &= (~opt));
+        writeRegister(XPOWERS_AXP2101_SLEEP_WAKEUP_CTRL, val);
     }
 
     bool enableWakeup(void)
@@ -1342,6 +1375,35 @@ public:
         :  clrRegisterBit(XPOWERS_AXP2101_DC_FORCE_PWM_CTRL, 7);
     }
 
+    void enableCCM()
+    {
+        setRegisterBit(XPOWERS_AXP2101_DC_ONOFF_DVM_CTRL, 6);
+    }
+
+    void disableCCM()
+    {
+        clrRegisterBit(XPOWERS_AXP2101_DC_ONOFF_DVM_CTRL, 6);
+    }
+
+    bool isEanbleCCM()
+    {
+        return getRegisterBit(XPOWERS_AXP2101_DC_ONOFF_DVM_CTRL, 6);
+    }
+
+    enum DVMRamp {
+        XPOWERS_AXP2101_DVM_RAMP_15_625US,
+        XPOWERS_AXP2101_DVM_RAMP_31_250US,
+    };
+
+    //args:enum DVMRamp
+    void setDVMRamp(uint8_t opt)
+    {
+        if (opt > 2)return;
+        opt == 0 ? clrRegisterBit(XPOWERS_AXP2101_DC_ONOFF_DVM_CTRL, 5) : setRegisterBit(XPOWERS_AXP2101_DC_ONOFF_DVM_CTRL, 5);
+    }
+
+
+
     /*
      * Power control DCDC1 functions
      */
@@ -1519,6 +1581,8 @@ public:
     uint16_t getDC3Voltage(void)
     {
         int val = readRegister(XPOWERS_AXP2101_DC_VOL2_CTRL) & 0x7F;
+        if (val == -1)
+            return 0;
         if (val < XPOWERS_AXP2101_DCDC3_VOL_STEPS2_BASE) {
             return (val  * XPOWERS_AXP2101_DCDC3_VOL_STEPS1) +  XPOWERS_AXP2101_DCDC3_VOL_MIN;
         } else if (val >= XPOWERS_AXP2101_DCDC3_VOL_STEPS2_BASE && val < XPOWERS_AXP2101_DCDC3_VOL_STEPS3_BASE) {
@@ -2171,10 +2235,10 @@ public:
         return clrRegisterBit(XPOWERS_AXP2101_ADC_CHANNEL_CTRL, 4);
     }
 
-    uint16_t getTemperature(void)
+    float getTemperature(void)
     {
-        //!FIXME
-        return readRegisterH6L8(XPOWERS_AXP2101_ADC_DATA_RELUST8, XPOWERS_AXP2101_ADC_DATA_RELUST9);
+        uint16_t raw = readRegisterH6L8(XPOWERS_AXP2101_ADC_DATA_RELUST8, XPOWERS_AXP2101_ADC_DATA_RELUST9);
+        return XPOWERS_AXP2101_CONVERSION(raw);
     }
 
     bool enableSystemVoltageMeasure(void)
@@ -2369,7 +2433,9 @@ public:
      */
     uint8_t getChargerConstantCurr(void)
     {
-        return (readRegister(XPOWERS_AXP2101_ICC_CHG_SET) & 0x1F);
+        int val = readRegister(XPOWERS_AXP2101_ICC_CHG_SET);
+        if (val == -1)return 0;
+        return val & 0x1F;
     }
 
     /**
@@ -2382,7 +2448,7 @@ public:
         int val = readRegister(XPOWERS_AXP2101_ITERM_CHG_SET_CTRL);
         if (val == -1)return;
         val &= 0xF0;
-        writeRegister(XPOWERS_AXP2101_ICC_CHG_SET, val | opt);
+        writeRegister(XPOWERS_AXP2101_ITERM_CHG_SET_CTRL, val | opt);
     }
 
     xpowers_axp2101_chg_iterm_t getChargerTerminationCurr(void)
@@ -2420,7 +2486,7 @@ public:
         if (opt >= XPOWERS_AXP2101_CHG_VOL_MAX)return false;
         int val = readRegister(XPOWERS_AXP2101_CV_CHG_VOL_SET);
         if (val == -1)return false;
-        val &= 0xFC;
+        val &= 0xF8;
         return 0 == writeRegister(XPOWERS_AXP2101_CV_CHG_VOL_SET, val | opt);
     }
 
@@ -2430,7 +2496,7 @@ public:
      */
     uint8_t getChargeTargetVoltage(void)
     {
-        return (readRegister(XPOWERS_AXP2101_CV_CHG_VOL_SET) & 0x03);
+        return (readRegister(XPOWERS_AXP2101_CV_CHG_VOL_SET) & 0x07);
     }
 
 
@@ -2456,6 +2522,20 @@ public:
         return  readRegister(XPOWERS_AXP2101_BAT_PARAME);
     }
 
+    void fuelGaugeControl(bool writeROM, bool enable)
+    {
+        if (writeROM) {
+            clrRegisterBit(XPOWERS_AXP2101_FUEL_GAUGE_CTRL, 4);
+        } else {
+            setRegisterBit(XPOWERS_AXP2101_FUEL_GAUGE_CTRL, 4);
+        }
+        if (enable) {
+            setRegisterBit(XPOWERS_AXP2101_FUEL_GAUGE_CTRL, 0);
+        } else {
+            clrRegisterBit(XPOWERS_AXP2101_FUEL_GAUGE_CTRL, 0);
+        }
+    }
+
     /*
      * Interrupt status/control functions
      */
@@ -2476,7 +2556,7 @@ public:
     /**
      * @brief  Clear interrupt controller state.
      */
-    void clearIrqStatus(void)
+    void clearIrqStatus()
     {
         for (int i = 0; i < XPOWERS_AXP2101_INTSTS_CNT; i++) {
             writeRegister(XPOWERS_AXP2101_INTSTS1 + i, 0xFF);
@@ -2952,6 +3032,7 @@ protected:
     {
         if (getChipID() == XPOWERS_AXP2101_CHIP_ID) {
             setChipModel(XPOWERS_AXP2101);
+            disableTSPinMeasure();      //Disable NTC temperature detection by default
             return true;
         }
         return  false;
@@ -2964,7 +3045,7 @@ protected:
     {
         int res = 0;
         uint8_t data = 0, value = 0;
-        log_d("%s - HEX:0x%lx \n", enable ? "ENABLE" : "DISABLE", opts);
+        log_d("%s - HEX:0x%x \n", enable ? "ENABLE" : "DISABLE", opts);
         if (opts & 0x0000FF) {
             value = opts & 0xFF;
             // log_d("Write INT0: %x\n", value);

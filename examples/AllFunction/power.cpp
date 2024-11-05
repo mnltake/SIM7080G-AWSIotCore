@@ -8,7 +8,7 @@
  */
 #include "power.h"
 
-#define XPOWERS_CHIP_AXP2102
+#define XPOWERS_CHIP_AXP2101
 #include "XPowersLib.h"
 #include "utilities.h"
 XPowersPMU PMU;
@@ -21,6 +21,13 @@ bool setupPower()
         return false;
     }
 
+    // If it is a power cycle, turn off the modem power. Then restart it
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED ) {
+        PMU.disableDC3();
+        // Wait a minute
+        delay(200);
+    }
+    
     // Set VSY off voltage as 2600mV , Adjustment range 2600mV ~ 3300mV
     PMU.setSysPowerDownVoltage(2600);
 

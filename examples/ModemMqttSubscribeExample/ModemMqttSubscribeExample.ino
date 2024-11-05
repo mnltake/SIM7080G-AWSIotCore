@@ -7,7 +7,7 @@
  *
  */
 #include <Arduino.h>
-#define XPOWERS_CHIP_AXP2102
+#define XPOWERS_CHIP_AXP2101
 #include "XPowersLib.h"
 #include "utilities.h"
 
@@ -47,8 +47,13 @@ enum {
 };
 
 
-// Your GPRS credentials, if any
-const char apn[] = "CNNBIOT";
+//!! Set the APN manually. Some operators need to set APN first when registering the network.
+//!! Set the APN manually. Some operators need to set APN first when registering the network.
+//!! Set the APN manually. Some operators need to set APN first when registering the network.
+// Using 7080G with Hologram.io , https://github.com/Xinyuan-LilyGO/LilyGo-T-SIM7080G/issues/19
+// const char *apn = "hologram";
+
+const char *apn = "Your APN";
 const char gprsUser[] = "";
 const char gprsPass[] = "";
 
@@ -111,6 +116,14 @@ void setup()
             delay(5000);
         }
     }
+
+    // If it is a power cycle, turn off the modem power. Then restart it
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED ) {
+        PMU.disableDC3();
+        // Wait a minute
+        delay(200);
+    }
+
     //Set the working voltage of the modem, please do not modify the parameters
     PMU.setDC3Voltage(3000);    //SIM7080 Modem main power channel 2700~ 3400V
     PMU.enableDC3();
@@ -161,6 +174,11 @@ void setup()
         return ;
     }
 
+    // Disable RF
+    modem.sendAT("+CFUN=0");
+    if (modem.waitResponse(20000UL) != 1) {
+        Serial.println("Disable RF Failed!");
+    }
 
     /*********************************
      * step 4 : Set the network mode to NB-IOT
@@ -177,10 +195,30 @@ void setup()
     Serial.printf("getNetworkMode:%u getPreferredMode:%u\n", mode, pre);
 
 
+    //Set the APN manually. Some operators need to set APN first when registering the network.
+    modem.sendAT("+CGDCONT=1,\"IP\",\"", apn, "\"");
+    if (modem.waitResponse() != 1) {
+        Serial.println("Set operators apn Failed!");
+        return;
+    }
+
+    //!! Set the APN manually. Some operators need to set APN first when registering the network.
+    modem.sendAT("+CNCFG=0,1,\"", apn, "\"");
+    if (modem.waitResponse() != 1) {
+        Serial.println("Config apn Failed!");
+        return;
+    }
+
+    // Enable RF
+    modem.sendAT("+CFUN=1");
+    if (modem.waitResponse(20000UL) != 1) {
+        Serial.println("Enable RF Failed!");
+    }
+
     /*********************************
     * step 5 : Wait for the network registration to succeed
     ***********************************/
-    RegStatus s;
+    SIM70xxRegStatus s;
     do {
         s = modem.getRegistrationStatus();
         if (s != REG_OK_HOME && s != REG_OK_ROAMING) {
@@ -244,15 +282,16 @@ void setup()
         return;
     }
 
+    int8_t ret;
     do {
 
         modem.sendAT("+SMCONN");
-        res = modem.waitResponse(30000);
-        if (!res) {
+        ret = modem.waitResponse(30000);
+        if (ret != 1) {
             Serial.println("Connect failed, retry connect ..."); delay(1000);
         }
 
-    } while (res != 1);
+    } while (ret != 1);
 
 
     Serial.println("MQTT Client connected!");
