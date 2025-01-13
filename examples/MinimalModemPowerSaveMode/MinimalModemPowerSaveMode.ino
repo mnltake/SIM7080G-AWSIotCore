@@ -22,7 +22,7 @@ XPowersPMU  PMU;
 #include <TinyGsmClient.h>
 #include "utilities.h"
 
-
+#include <ArduinoHttpClient.h>
 #ifdef DUMP_AT_COMMANDS
 #include <StreamDebugger.h>
 StreamDebugger debugger(Serial1, Serial);
@@ -50,12 +50,19 @@ enum {
 void getPsmTimer();
 
 // Your GPRS credentials, if any
-const char apn[] = "CNNBIOT";
+const char apn[] = "soracom.io";
 // const char apn[] = "ibasis.iot";
-const char gprsUser[] = "";
-const char gprsPass[] = "";
+const char gprsUser[] = "sora";
+const char gprsPass[] = "sora";
 bool  level = false;
-
+// Soracom  の接続先情報
+#define ENDPOINT "uni.soracom.io"
+const char* server = "uni.soracom.io"; // Soracomのエンドポイント
+const int port = 23080;                // Soracom のポート番号
+int count = 0;
+// LTEオブジェクト
+TinyGsmClient client(modem);
+HttpClient    http(client, server, port);
 
 
 void setup()
@@ -64,7 +71,7 @@ void setup()
     Serial.begin(115200);
 
     //Start while waiting for Serial monitoring
-    while (!Serial);
+    // while (!Serial);
 
     delay(3000);
 
@@ -94,7 +101,7 @@ void setup()
 
     //Modem GPS Power channel
     PMU.setBLDO2Voltage(3300);
-    PMU.enableBLDO2();      //The antenna power must be turned on to use the GPS function
+    PMU.disableBLDO2();      //The antenna power must be turned on to use the GPS function
 
     // TS Pin detection must be disable, otherwise it cannot be charged
     PMU.disableTSPinMeasure();
@@ -113,16 +120,17 @@ void setup()
     int retry = 0;
     while (!modem.testAT(1000)) {
         Serial.print(".");
-        if (retry++ > 6) {
-            // Pull down PWRKEY for more than 1 second according to manual requirements
-            digitalWrite(BOARD_MODEM_PWR_PIN, LOW);
-            delay(100);
-            digitalWrite(BOARD_MODEM_PWR_PIN, HIGH);
+        retry++;
+        if(retry < 6){
+            delay(2000);
+        }else if (retry ==6 ) {
+            PMU.disableDC3();
             delay(1000);
-            digitalWrite(BOARD_MODEM_PWR_PIN, LOW);
+            PMU.setDC3Voltage(3400);    //SIM7080 Modem main power channel 2700~ 3400V
+            PMU.enableDC3();
             retry = 0;
-            Serial.println("Retry start modem .");
         }
+        
     }
     Serial.println();
     Serial.print("Modem started!");
@@ -141,91 +149,39 @@ void setup()
 
 
     // Assuming that PSM mode is enabled, turn it off first.
-    // modem.sendAT("+CPSMS=0,,,\"01011111\",\"00000001\"");
-    // if (modem.waitResponse(5000) == 1) {
-    //     Serial.println("PSM Mode disable OK!");
-    //     if (modem.waitResponse(30000, "+CPSMSTATUS:") == 1) {
-    //         result = modem.stream.readStringUntil('\r');
-    //         Serial.println();
-    //         Serial.print("Relust:");
-    //         Serial.println(result);
-    //     }
-    // }
-
-    /*********************************
-     * step 4 : Set the network mode to NB-IOT
-    ***********************************/
-
-    modem.setNetworkMode(2);    //use automatic
-
-    modem.setPreferredMode(MODEM_NB_IOT);
-
-    uint8_t pre = modem.getPreferredMode();
-
-    uint8_t mode = modem.getNetworkMode();
-
-    Serial.printf("getNetworkMode:%u getPreferredMode:%u\n", mode, pre);
-
-
-    /*********************************
-    * step 5 : Wait for the network registration to succeed
-    ***********************************/
-    SIM70xxRegStatus s;
-    do {
-        s = modem.getRegistrationStatus();
-        if (s != REG_OK_HOME && s != REG_OK_ROAMING) {
-            Serial.print(".");
-            PMU.setChargingLedMode(level ? XPOWERS_CHG_LED_ON : XPOWERS_CHG_LED_OFF);
-            level ^= 1;
-            delay(1000);
+    modem.sendAT("+CPSMS=0,,,\"01011111\",\"00000001\"");
+    if (modem.waitResponse(5000) == 1) {
+        Serial.println("PSM Mode disable OK!");
+        if (modem.waitResponse(30000, "+CPSMSTATUS:") == 1) {
+            result = modem.stream.readStringUntil('\r');
+            Serial.println();
+            Serial.print("Relust:");
+            Serial.println(result);
         }
-
-    } while (s != REG_OK_HOME && s != REG_OK_ROAMING) ;
-
-    Serial.println();
-    Serial.print("Network register info:");
-    Serial.println(register_info[s]);
-
-    // Activate network bearer, APN can not be configured by default,
-    // if the SIM card is locked, please configure the correct APN and user password, use the gprsConnect() method
-    modem.sendAT("+CNACT=0,1");
-    if (modem.waitResponse() != 1) {
-        Serial.println("Activate network bearer Failed!");
-        return;
+    } else {
+        Serial.println("PSM Mode disable Failed!");
     }
 
-    // if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
-    //     return ;
-    // }
 
-    bool res = modem.isGprsConnected();
-    Serial.print("GPRS status:");
-    Serial.println(res ? "connected" : "not connected");
+    String modemInfo = modem.getModemInfo();
+    Serial.print("Modem Info: ");
+    Serial.println(modemInfo);
+    //   modem.gprsConnect("soracom.io", "sora", "sora");// 初回だけ必要
+    Serial.print(F("waitForNetwork()"));
+    while (!modem.waitForNetwork()) Serial.print(".");
+    Serial.println(F(" Ok."));
 
-    String ccid = modem.getSimCCID();
-    Serial.print("CCID:");
-    Serial.println(ccid);
+    Serial.print(F("gprsConnect(soracom.io)"));
+    modem.gprsConnect("soracom.io", "sora", "sora");
+    Serial.println(F(" done."));
 
-    String imei = modem.getIMEI();
-    Serial.print("IMEI:");
-    Serial.println(imei);
+    Serial.print(F("isNetworkConnected()"));
+    while (!modem.isNetworkConnected()) Serial.print(".");
+    Serial.println(F(" Ok."));
 
-    String imsi = modem.getIMSI();
-    Serial.print("IMSI:");
-    Serial.println(imsi);
-
-    String cop = modem.getOperator();
-    Serial.print("Operator:");
-    Serial.println(cop);
-
-    IPAddress local = modem.localIP();
-    Serial.print("Local IP:");
-    Serial.println(local);
-
-    int csq = modem.getSignalQuality();
-    Serial.print("Signal quality:");
-    Serial.println(csq);
-
+    Serial.print(F("My IP addr: "));
+    IPAddress ipaddr = modem.localIP();
+    Serial.println(ipaddr);
 
     //Enable PSM Event report
     modem.sendAT("+CPSMSTATUS=1");
@@ -248,13 +204,13 @@ void setup()
     * please consult the communication operator
     * T3412, T3324 time Please check the manual or getPsmTimer description
     * */
-    // modem.sendAT("+CPSMS=1,,,\"10100011\",\"00100001\"");
-    // if (modem.waitResponse(5000) != 1) {
-    //     Serial.println("PSM Mode enable failed!");
-    //     return ;
-    // }
+    modem.sendAT("+CPSMS=1,,,\"01111110\",\"00000001\"");
+    if (modem.waitResponse(5000) != 1) {
+        Serial.println("PSM Mode enable failed!");
+        return ;
+    }
 
-
+    esp_sleep_enable_timer_wakeup((300 * 1000 )* 1000);
 
 
     //AT+CSCLK=1 : Enable sleep mode 1.
@@ -270,18 +226,60 @@ void setup()
 
 
     //Pulling down DTR pin will wake module up from sleep mode.
-    digitalWrite(BOARD_MODEM_DTR_PIN, LOW);
+    // digitalWrite(BOARD_MODEM_DTR_PIN, LOW);
 #endif
 }
 
 void loop()
 {
-    while (Serial1.available()) {
-        Serial.write(Serial1.read());
+    // while (Serial1.available()) {
+    //     Serial.write(Serial1.read());
+    // }
+    // while (Serial.available()) {
+    //     Serial1.write(Serial.read());
+    // }
+    // delay(1000*30);
+
+    // esp_light_sleep_start();
+    digitalWrite(BOARD_MODEM_DTR_PIN, LOW);
+    PMU.setChargingLedMode(XPOWERS_CHG_LED_ON);
+    Serial.println("Wake up from sleep mode!");
+
+      // UDP通信の準備
+  if (!http.connect(ENDPOINT, 23080)) {
+    Serial.println("Failed to connect to Soracom.");
+    return;
+  }
+  // uptime を計算 (秒単位)
+  unsigned long uptime = millis() / 1000;
+  count ++;
+  // JSON形式のメッセージを作成
+  char jsonMessage[128];
+  snprintf(jsonMessage, sizeof(jsonMessage), "{\"uptime\": %lu, \"count\": %d}", uptime, count);
+
+  // Soracom  UDPでデータを送信
+  client.print(jsonMessage);
+//   http.post(ENDPOINT, "application/json", jsonMessage);
+ 
+  if (client.available()) {
+    char c = client.read();
+    Serial.print(c);
+  }
+  client.stop();
+
+
+  // 次回送信まで待機
+
+   
+    if(!Serial){Serial.begin(115200);}
+    digitalWrite(BOARD_MODEM_DTR_PIN, HIGH);
+    PMU.setChargingLedMode(XPOWERS_CHG_LED_OFF);
+    Serial.println("Enter sleep mode!");
+    modem.sendAT("+CSCLK=1");
+    if (modem.waitResponse() != 1) {
+        Serial.println("Enable modem sleep failed!");
     }
-    while (Serial.available()) {
-        Serial1.write(Serial.read());
-    }
+    esp_light_sleep_start();
 }
 
 
